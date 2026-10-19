@@ -1,0 +1,25 @@
+{
+  "dataset": "WIDER FACE validation",
+  "images": 3226,
+  "detector_score_threshold": 0.6,
+  "recall_by_size": {
+    "tiny (<16 px)": {
+      "faces": 19351,
+      "recall": 0.3882
+    },
+    "small (16-32 px)": {
+      "faces": 10165,
+      "recall": 0.7783
+    },
+    "medium (32-64 px)": {
+      "faces": 6056,
+      "recall": 0.8788
+    },
+    "large (>=64 px)": {
+      "faces": 3540,
+      "recall": 0.9184
+    }
+  },
+  "recall_overall": 0.6135,
+  "recall_faces_16px_and_up": 0.8342
+}

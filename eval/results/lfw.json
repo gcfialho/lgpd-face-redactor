@@ -1,0 +1,26 @@
+{
+  "dataset": "LFW funneled, 6000 pairs (pairs.txt)",
+  "pairs": 6000,
+  "detection_or_alignment_failures": 0,
+  "accuracy_mean": 0.9938333333333335,
+  "accuracy_std": 0.0036552853665768902,
+  "threshold_mean": 0.33080000000000004,
+  "auc": 0.9988236666666666,
+  "operating_points": [
+    {
+      "far": 0.1,
+      "threshold": 0.20061053335666656,
+      "tar": 0.997
+    },
+    {
+      "far": 0.01,
+      "threshold": 0.28893232345581055,
+      "tar": 0.9943333333333333
+    },
+    {
+      "far": 0.001,
+      "threshold": 0.35184454917907715,
+      "tar": 0.9866666666666667
+    }
+  ]
+}

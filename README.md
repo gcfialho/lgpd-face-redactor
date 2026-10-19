@@ -83,9 +83,39 @@ result.
 
 ## Results
 
-The benchmarks run in the [`Evaluate`](.github/workflows/evaluate.yml) GitHub Actions
-workflow, on WIDER FACE validation and the 6,000 LFW pairs. Their figures will be
-published here once the first run completes.
+Measured by the [`Evaluate`](.github/workflows/evaluate.yml) workflow. Raw numbers are in
+[`eval/results/`](eval/results/).
+
+**Recognition: LFW, 6,000 standard pairs, 10-fold protocol.** No pair failed detection
+or alignment.
+
+| Metric | Value |
+|---|---|
+| Verification accuracy | **99.38% ± 0.37%** |
+| ROC AUC | 0.9988 |
+| Threshold for 1% false accepts | 0.289 (true accept rate 99.4%) |
+| Threshold for 0.1% false accepts | 0.352 (true accept rate 98.7%) |
+
+The default track threshold (0.42) sits above the 0.1% false accept point. It deliberately
+trades some missed matches, which only blur the subject, for fewer strangers left visible.
+
+**Detection: WIDER FACE validation, 3,226 images, 39,112 faces.** A face counts as found
+if a detection covers it with IoU ≥ 0.5, or covers 80% of it after the redactor's box
+expansion.
+
+| Face size (shorter side) | Faces | Recall |
+|---|---|---|
+| ≥ 64 px | 3,540 | **91.8%** |
+| 32–64 px | 6,056 | 87.9% |
+| 16–32 px | 10,165 | 77.8% |
+| < 16 px | 19,351 | 38.8% |
+| **16 px and up** | 19,761 | **83.4%** |
+
+WIDER FACE is deliberately hard: crowds, occlusion and extreme poses, and half of its faces
+are under 16 px. Faces of 32 px or more were found 88–92% of the time, so even in
+favourable footage the detector is not perfect. A missed face is the main residual risk,
+which is why every output should go through human review before release (see
+Limitations).
 
 ## Methodology
 
@@ -150,13 +180,15 @@ scenarios that matter without any real faces:
 **Limitations**
 - Only faces are redacted. Clothing, tattoos, voices, licence plates and on-screen text can
   also identify people; review the output before releasing it.
-- Very small faces (under about 16 px) are hard for any detector. See the WIDER FACE recall
-  by size in Results.
+- Detection recall is about 92% for large faces and drops sharply below 16 px (38.8% on
+  WIDER FACE). Distant or tiny faces in wide CCTV shots can be missed. Review every
+  output, or use `--style box` and crop the area of interest before redacting.
 - The output codec is `mp4v`. Some browsers need H.264; re-encode with ffmpeg if needed.
 - This tool supports a controller's process. It is not legal advice, and a human should
   review every release.
 
 **Roadmap**
+- Tiled or upscaled detection for small faces, which is the weakest bucket above.
 - Body-level redaction (person segmentation) and licence plates.
 - A stronger tracker (Kalman filter with appearance features) and H.264 output.
 - An end-to-end leakage benchmark on consented multi-person footage.
