@@ -1,14 +1,19 @@
-"""Two-pass redaction.
+"""Redaction in three steps, so the people to keep can be chosen after seeing who is there.
 
-Pass 1 detects, embeds and tracks every face. Decisions are then made per track, using
-the whole track, which a single streaming pass cannot do. Pass 2 renders the plan.
+1. `analyze`: detect, embed and track every face (one pass over the frames).
+2. `assess`: compare every sighting with the people to keep, decide per track, plan the blur.
+   It is cheap, so it can be re-run for each selection without touching the video again.
+3. `render`: apply the plan (second pass over the frames).
+
+The CLI keeps people given as reference photos; the web app keeps the people a reviewer
+ticks in the gallery. Both feed the same `ReferenceGallery` and the same fail-safe policy.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +25,8 @@ from lgpd_face_redactor.tracking import IouTracker, TrackerConfig
 from lgpd_face_redactor.types import FaceDetector, FaceEmbedder, Style, Track
 
 log = logging.getLogger(__name__)
+
+Progress = Callable[[int], None]  # called with the index of each processed frame
 
 
 @dataclass
@@ -34,18 +41,18 @@ class RedactionConfig:
 @dataclass
 class Analysis:
     tracks: list[Track]
-    decisions: dict[int, TrackDecision]
-    plan: RenderPlan
     frame_count: int
     faces_seen: int
+    decisions: dict[int, TrackDecision] = field(default_factory=dict)
+    plan: RenderPlan = field(default_factory=RenderPlan)
 
 
 def analyze(
     frames: Iterable[np.ndarray],
     detector: FaceDetector,
     embedder: FaceEmbedder | None,
-    gallery: ReferenceGallery,
     config: RedactionConfig,
+    progress: Progress | None = None,
 ) -> Analysis:
     tracker = IouTracker(config.tracker)
     frame_count = faces_seen = 0
@@ -53,15 +60,26 @@ def analyze(
         detections = detector.detect(frame)
         faces_seen += len(detections)
         embeddings = [embedder.embed(frame, d) if embedder else None for d in detections]
-        similarities = [gallery.best_similarity(e) if e is not None and len(gallery) else None for e in embeddings]
-        tracker.update(index, detections, similarities, embeddings)
+        tracker.update(index, detections, embeddings)
         frame_count = index + 1
+        if progress:
+            progress(index)
+    return Analysis(tracker.finish(), frame_count, faces_seen)
 
-    tracks = tracker.finish()
+
+def assess(analysis: Analysis, gallery: ReferenceGallery, config: RedactionConfig) -> Analysis:
+    """Score every sighting against the people to keep, then decide and plan. Mutates and returns `analysis`."""
     has_reference = len(gallery) > 0
-    decisions = {t.id: decide(t, config.policy, has_reference) for t in tracks}
-    plan = plan_render(tracks, decisions, config.policy, frame_count)
-    return Analysis(tracks, decisions, plan, frame_count, faces_seen)
+    for track in analysis.tracks:
+        for obs in track.observations:
+            obs.similarity = (
+                gallery.best_similarity(obs.embedding.astype(np.float32))
+                if has_reference and obs.embedding is not None
+                else None
+            )
+    analysis.decisions = {t.id: decide(t, config.policy, has_reference) for t in analysis.tracks}
+    analysis.plan = plan_render(analysis.tracks, analysis.decisions, config.policy, analysis.frame_count)
+    return analysis
 
 
 def render(frames: Iterable[np.ndarray], plan: RenderPlan, config: RedactionConfig) -> Iterable[np.ndarray]:
@@ -72,91 +90,29 @@ def render(frames: Iterable[np.ndarray], plan: RenderPlan, config: RedactionConf
         yield obscure(frame, boxes, config.style, config.blocks) if boxes else frame
 
 
-@dataclass
-class Job:
-    """Everything needed to analyse and render one input; built once, rendered as often as the reviewer likes."""
-
-    source: Path
-    info: object  # media.MediaInfo
-    config: RedactionConfig
-    detector: FaceDetector
-    embedder: FaceEmbedder | None
-    gallery: ReferenceGallery
-    analysis: Analysis | None = None
-    overrides: dict[int, Decision] = field(default_factory=dict)
-
-
-def prepare(
-    source: Path,
-    references: list[Path],
-    config: RedactionConfig,
-    detector: FaceDetector | None = None,
-    embedder: FaceEmbedder | None = None,
-) -> Job:
-    from lgpd_face_redactor import media
-    from lgpd_face_redactor.vision import SFaceEmbedder, YuNetDetector, reference_embedding
-
-    info = media.probe(source)
+def config_for(info, config: RedactionConfig) -> RedactionConfig:
+    """A still image has no history to confirm a match, so one frame is enough evidence."""
     if info.is_image:
-        # A still image has no history to confirm a match, so one frame is enough.
-        config = dataclasses.replace(config, policy=dataclasses.replace(config.policy, min_frames=1, pad_frames=0))
-
-    detector = detector or YuNetDetector()
-    if references and embedder is None:
-        embedder = SFaceEmbedder()
-    gallery = ReferenceGallery([reference_embedding(r, detector, embedder) for r in references])
-    return Job(source, info, config, detector, embedder, gallery)
+        return dataclasses.replace(config, policy=dataclasses.replace(config.policy, min_frames=1, pad_frames=0))
+    return config
 
 
-def run_analysis(job: Job) -> Analysis:
+def render_file(source: Path, info, analysis: Analysis, output: Path, config: RedactionConfig) -> bool:
+    """Writes the redacted copy. Returns whether the audio track was kept."""
     from lgpd_face_redactor import media
 
-    job.analysis = analyze(media.frames(job.info), job.detector, job.embedder, job.gallery, job.config)
-    return job.analysis
-
-
-def apply_overrides(job: Job, overrides: dict[int, Decision]) -> Analysis:
-    """A reviewer's decisions replace the automatic ones and are recorded as such in the audit."""
-    assert job.analysis is not None, "run_analysis first"
-    analysis = job.analysis
-    decisions = dict(analysis.decisions)
-    for track_id, decision in overrides.items():
-        auto = decisions[track_id]
-        if decision is not auto.decision:
-            decisions[track_id] = dataclasses.replace(
-                auto,
-                decision=decision,
-                reason=f"manual override by reviewer (automatic: {auto.decision}, {auto.reason})",
-            )
-    job.overrides = dict(overrides)
-    plan = plan_render(analysis.tracks, decisions, job.config.policy, analysis.frame_count)
-    job.analysis = dataclasses.replace(analysis, decisions=decisions, plan=plan)
-    return job.analysis
-
-
-def render_file(job: Job, output: Path) -> dict:
-    from lgpd_face_redactor import audit, media
-
-    assert job.analysis is not None, "run_analysis first"
-    writer = media.Writer(job.info, output)
+    writer = media.Writer(info, output)
     try:
-        for frame in render(media.frames(job.info), job.analysis.plan, job.config):
+        for frame in render(media.frames(info), analysis.plan, config):
             writer.write(frame)
     finally:
         writer.close()
 
-    audio = False
-    if job.config.keep_audio and not job.info.is_image:
-        audio = media.mux_audio(job.source, output)
-        if not audio:
-            log.warning("ffmpeg not found: the output has no audio")
-
-    analysis = job.analysis
-    kept = sum(d.decision is Decision.KEEP for d in analysis.decisions.values())
-    log.info(
-        "%d faces in %d tracks; %d kept visible, the rest blurred", analysis.faces_seen, len(analysis.tracks), kept
-    )
-    return audit.build(job, output, audio)
+    if config.keep_audio and not info.is_image:
+        if media.mux_audio(source, output):
+            return True
+        log.warning("ffmpeg not found: the output has no audio")
+    return False
 
 
 def redact_file(
@@ -167,7 +123,26 @@ def redact_file(
     detector: FaceDetector | None = None,
     embedder: FaceEmbedder | None = None,
 ) -> tuple[Analysis, dict]:
-    job = prepare(source, references, config, detector, embedder)
-    run_analysis(job)
-    record = render_file(job, output)
-    return job.analysis, record
+    """CLI path: keep the people in the reference photos, blur everyone else."""
+    from lgpd_face_redactor import audit, media
+    from lgpd_face_redactor.vision import SFaceEmbedder, YuNetDetector, reference_embedding
+
+    info = media.probe(source)
+    config = config_for(info, config)
+    detector = detector or YuNetDetector()
+    if references and embedder is None:
+        embedder = SFaceEmbedder()
+    gallery = ReferenceGallery([reference_embedding(r, detector, embedder) for r in references])
+
+    analysis = assess(analyze(media.frames(info), detector, embedder, config), gallery, config)
+    audio = render_file(source, info, analysis, output, config)
+
+    kept = sum(d.decision is Decision.KEEP for d in analysis.decisions.values())
+    log.info(
+        "%d faces in %d tracks; %d kept visible, the rest blurred", analysis.faces_seen, len(analysis.tracks), kept
+    )
+    mode = "keep-references" if len(gallery) else "blur-all"
+    record = audit.build(
+        source, output, info, analysis, config, detector, audio, mode=mode, kept_people=len(references)
+    )
+    return analysis, record

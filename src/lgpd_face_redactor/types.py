@@ -59,12 +59,18 @@ class Detection:
 
 @dataclass
 class Observation:
-    """One detection assigned to a track, with its similarity to the closest reference face."""
+    """One detection assigned to a track.
+
+    `embedding` is the L2-normalised face embedding (float16 to keep long videos in memory),
+    or None when the face could not be aligned. `similarity` is filled in later, against
+    whichever people the user decided to keep.
+    """
 
     frame: int
     box: Box
     score: float
-    similarity: float | None  # None when no reference was given or the face could not be embedded
+    similarity: float | None = None
+    embedding: np.ndarray | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -86,6 +92,20 @@ class Track:
 
     def similarities(self) -> list[float]:
         return [o.similarity for o in self.observations if o.similarity is not None]
+
+    def embeddings(self) -> list[np.ndarray]:
+        return [o.embedding.astype(np.float32) for o in self.observations if o.embedding is not None]
+
+    def mean_embedding(self) -> np.ndarray | None:
+        vectors = self.embeddings()
+        if not vectors:
+            return None
+        mean = np.mean(vectors, axis=0)
+        norm = float(np.linalg.norm(mean))
+        return mean / norm if norm else None
+
+    def frames(self) -> set[int]:
+        return {o.frame for o in self.observations}
 
 
 class FaceDetector(Protocol):

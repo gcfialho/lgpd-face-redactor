@@ -51,22 +51,28 @@ class TestTracker:
         tracker = IouTracker()
         for f in range(10):
             boxes = [Box(10 + f, 10, 40, 40), Box(200 - f, 10, 40, 40)]
-            tracker.update(f, [det(b) for b in boxes], [None, None], [None, None])
+            tracker.update(f, [det(b) for b in boxes], [None, None])
         tracks = tracker.finish()
         assert [len(t.observations) for t in tracks] == [10, 10]
 
     def test_appearance_gate_splits_overlapping_different_people(self):
         tracker = IouTracker()
         box = Box(10, 10, 40, 40)
-        tracker.update(0, [det(box)], [None], [identity_vector(1)])
-        tracker.update(1, [det(box)], [None], [identity_vector(2)])  # same place, different face
+        tracker.update(0, [det(box)], [identity_vector(1)])
+        tracker.update(1, [det(box)], [identity_vector(2)])  # same place, different face
         assert len(tracker.finish()) == 2
+
+    def test_stores_normalised_embeddings(self):
+        tracker = IouTracker()
+        tracker.update(0, [det(Box(10, 10, 40, 40))], [identity_vector(1) * 7])
+        (track,) = tracker.finish()
+        assert np.linalg.norm(track.observations[0].embedding.astype(np.float32)) == pytest.approx(1, abs=1e-3)
 
     def test_closes_track_after_long_gap(self):
         tracker = IouTracker()
         box = Box(10, 10, 40, 40)
-        tracker.update(0, [det(box)], [None], [None])
-        tracker.update(50, [det(box)], [None], [None])
+        tracker.update(0, [det(box)], [None])
+        tracker.update(50, [det(box)], [None])
         assert len(tracker.finish()) == 2
 
 

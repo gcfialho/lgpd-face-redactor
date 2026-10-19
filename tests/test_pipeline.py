@@ -3,7 +3,7 @@
 from conftest import IdentityEmbedder, ScriptedDetector, identity_vector, walk
 
 from lgpd_face_redactor.matching import ReferenceGallery
-from lgpd_face_redactor.pipeline import RedactionConfig, analyze
+from lgpd_face_redactor.pipeline import RedactionConfig, analyze, assess
 from lgpd_face_redactor.policy import Decision
 from lgpd_face_redactor.types import Box
 
@@ -12,9 +12,9 @@ SUBJECT, STRANGER, OTHER = 1, 2, 3
 
 def run(script, blank_frames, references=(SUBJECT,), noise=0.15):
     gallery = ReferenceGallery([identity_vector(r) for r in references])
-    return analyze(
-        blank_frames(len(script)), ScriptedDetector(script), IdentityEmbedder(noise), gallery, RedactionConfig()
-    )
+    config = RedactionConfig()
+    analysis = analyze(blank_frames(len(script)), ScriptedDetector(script), IdentityEmbedder(noise), config)
+    return assess(analysis, gallery, config)
 
 
 def visible(analysis, frame: int, box: Box) -> bool:
@@ -82,17 +82,15 @@ def test_several_people_can_be_kept(blank_frames):
     assert all(d.decision is Decision.KEEP for d in analysis.decisions.values())
 
 
-def test_reviewer_override_is_applied_and_explained(blank_frames):
-    from lgpd_face_redactor.pipeline import Job, apply_overrides
+def test_reassessing_with_a_different_selection_needs_no_new_pass(blank_frames):
+    """The web flow: analyse once, then assess for whichever people the reviewer picks."""
+    a, b = walk(Box(20, 50, 40, 40), 1, 20), walk(Box(200, 50, 40, 40), -1, 20)
+    script = [[(a[f], SUBJECT), (b[f], OTHER)] for f in range(20)]
+    config = RedactionConfig()
+    analysis = analyze(blank_frames(20), ScriptedDetector(script), IdentityEmbedder(), config)
 
-    subject = walk(Box(20, 50, 40, 40), 1, 20)
-    analysis = run([[(subject[f], SUBJECT)] for f in range(20)], blank_frames)
-    (track_id,) = analysis.decisions
-    assert analysis.decisions[track_id].decision is Decision.KEEP
+    assess(analysis, ReferenceGallery([identity_vector(SUBJECT)]), config)
+    assert visible(analysis, 10, a[10]) and not visible(analysis, 10, b[10])
 
-    job = Job(None, None, RedactionConfig(), None, None, ReferenceGallery(), analysis=analysis)
-    updated = apply_overrides(job, {track_id: Decision.BLUR})
-
-    assert updated.decisions[track_id].decision is Decision.BLUR
-    assert "manual override" in updated.decisions[track_id].reason
-    assert not any(visible(updated, f, subject[f]) for f in range(20))
+    assess(analysis, ReferenceGallery([identity_vector(OTHER)]), config)
+    assert not visible(analysis, 10, a[10]) and visible(analysis, 10, b[10])

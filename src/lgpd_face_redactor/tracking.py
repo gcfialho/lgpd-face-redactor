@@ -40,7 +40,6 @@ class IouTracker:
         self,
         frame: int,
         detections: list[Detection],
-        similarities: list[float | None],
         embeddings: list[np.ndarray | None],
     ) -> None:
         self._close_stale(frame)
@@ -62,13 +61,13 @@ class IouTracker:
                 continue
             used_tracks.add(t_idx)
             used_dets.add(d_idx)
-            self._append(self._active[t_idx], frame, detections[d_idx], similarities[d_idx], embeddings[d_idx])
+            self._append(self._active[t_idx], frame, detections[d_idx], embeddings[d_idx])
 
         for d_idx, det in enumerate(detections):
             if d_idx not in used_dets:
                 active = _ActiveTrack(Track(id=self._next_id))
                 self._next_id += 1
-                self._append(active, frame, det, similarities[d_idx], embeddings[d_idx])
+                self._append(active, frame, det, embeddings[d_idx])
                 self._active.append(active)
 
     def finish(self) -> list[Track]:
@@ -91,9 +90,9 @@ class IouTracker:
         return float(previous @ normalize(current)) >= self.config.appearance_threshold
 
     @staticmethod
-    def _append(
-        active: _ActiveTrack, frame: int, det: Detection, similarity: float | None, embedding: np.ndarray | None
-    ) -> None:
-        active.track.observations.append(Observation(frame, det.box, det.score, similarity))
-        if embedding is not None:
-            active.last_embedding = normalize(embedding)
+    def _append(active: _ActiveTrack, frame: int, det: Detection, embedding: np.ndarray | None) -> None:
+        unit = normalize(embedding) if embedding is not None else None
+        stored = unit.astype(np.float16) if unit is not None else None
+        active.track.observations.append(Observation(frame, det.box, det.score, embedding=stored))
+        if unit is not None:
+            active.last_embedding = unit

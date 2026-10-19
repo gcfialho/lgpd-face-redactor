@@ -15,29 +15,35 @@ from lgpd_face_redactor import __version__, models
 from lgpd_face_redactor.policy import Decision
 
 
-def build(job, output: Path, audio: bool) -> dict[str, Any]:
-    source, info, analysis, config = job.source, job.info, job.analysis, job.config
-    reference_count, detector = len(job.gallery), job.detector
+def build(
+    source: Path,
+    output: Path,
+    info,
+    analysis,
+    config,
+    detector,
+    audio: bool,
+    mode: str,
+    kept_people: int,
+    original_name: str | None = None,
+) -> dict[str, Any]:
+    """`mode` is "keep-references" (CLI photos), "selected-people" (web gallery) or "blur-all"."""
     decisions = [analysis.decisions[t.id] for t in analysis.tracks]
     return {
         "tool": {"name": "lgpd-face-redactor", "version": __version__},
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "input": {
-            "file": source.name,
+            "file": original_name or source.name,
             "sha256": models.sha256_of(source),
             "frames": analysis.frame_count,
             "fps": info.fps,
             "resolution": [info.width, info.height],
         },
         "output": {"file": output.name, "sha256": models.sha256_of(output), "audio_kept": audio},
-        "models": [
-            {"name": m.name, "sha256": m.sha256, "license": m.license}
-            for m in (models.YUNET, models.SFACE if reference_count else None)
-            if m is not None
-        ],
+        "models": [{"name": m.name, "sha256": m.sha256, "license": m.license} for m in (models.YUNET, models.SFACE)],
         "settings": {
-            "mode": "keep-references" if reference_count else "blur-all",
-            "reference_count": reference_count,
+            "mode": mode,
+            "people_kept_visible": kept_people if mode != "blur-all" else 0,
             "detector_score_threshold": getattr(detector, "score_threshold", None),
             "policy": dataclasses.asdict(config.policy),
             "tracker": dataclasses.asdict(config.tracker),
@@ -48,7 +54,6 @@ def build(job, output: Path, audio: bool) -> dict[str, Any]:
             "tracks": len(decisions),
             "tracks_kept": sum(d.decision is Decision.KEEP for d in decisions),
             "tracks_blurred": sum(d.decision is Decision.BLUR for d in decisions),
-            "manual_overrides": sum(d.reason.startswith("manual override") for d in decisions),
             "frames_with_redaction": len(analysis.plan.blur_boxes),
         },
         "tracks": [
