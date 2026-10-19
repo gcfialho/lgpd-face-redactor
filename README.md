@@ -21,17 +21,19 @@ Crew-11 arriving at Kennedy Space Center (NASA Image and Video Library).
 ## Highlights
 
 - **Fills a real gap.** Open-source tools such as deface and EgoBlur blur *every* face.
-  Keeping one person visible usually means commercial software and manual selection. Here
-  the subject is identified from a reference photo.
+  Keeping one person visible usually means commercial software and picking faces by hand.
+  Here you upload the footage, see everyone it contains grouped **by person**, and tick
+  who stays visible. A reference photo can pre-select the data subject.
 - **Fail-safe by design.** A face stays visible only when it matches the reference
   consistently across its whole track, and frame by frame. Everything else is blurred,
   including the frames around brief detector misses.
-- **Privacy built in.** Processing is local. Reference photos become 128-d embeddings in
-  memory only, nothing biometric is written to disk, and audio is dropped unless you ask
+- **Privacy built in.** Processing is local; the web app loads nothing from third parties.
+  Each job lives in a private temporary folder that is deleted on request or after one
+  hour. No biometric data goes into the audit record, and audio is dropped unless you ask
   to keep it.
 - **Accountable.** Every run writes a JSON audit record: input and output hashes, model
-  hashes, settings, and the decision and reason for each tracked person, including reviewer
-  overrides.
+  hashes, settings, how many people were kept, and the decision and reason for each
+  tracked person.
 - **Measured, not assumed.** Evaluation scripts report detector recall on WIDER FACE (a
   missed face is a leak) and calibrate the match threshold on LFW by false accept rate.
 
@@ -40,55 +42,75 @@ Crew-11 arriving at Kennedy Space Center (NASA Image and Video Library).
 Requires [uv](https://docs.astral.sh/uv/). The model weights (YuNet 232 KB, SFace 39 MB)
 are downloaded on first use from the OpenCV Zoo and verified by SHA-256.
 
+**Web app.** Upload a photo or video, tick who stays visible, download the result.
+
 ```bash
 git clone https://github.com/gcfialho/lgpd-face-redactor.git
 cd lgpd-face-redactor
-uv sync
-
-# Keep the person in subject.jpg visible, blur everyone else
-uv run lgpd-redact footage.mp4 --keep subject.jpg -o redacted.mp4
-
-# Blur every face
-uv run lgpd-redact footage.mp4 -o redacted.mp4
-
-# Review each decision in the browser before exporting
-uv run --extra review streamlit run src/lgpd_face_redactor/review.py
+uv sync --extra web
+uv run lgpd-redact-web                  # http://127.0.0.1:8000
 ```
 
-Each run also writes `redacted.mp4.audit.json`. Other options: `--keep` several times
-(several photos or people), `--style pixelate|blur|box`, `--threshold`, `--keep-audio`.
+The same app runs in Docker, with the model weights baked into the image so it works offline:
+
+```bash
+docker build -t lgpd-face-redactor .
+docker run --rm -p 127.0.0.1:8000:8000 lgpd-face-redactor   # published on localhost only
+```
+
+**Command line.** For batch jobs and scripts:
+
+```bash
+uv run lgpd-redact footage.mp4 --keep subject.jpg -o redacted.mp4   # keep the person in subject.jpg
+uv run lgpd-redact footage.mp4 -o redacted.mp4                      # blur every face
+```
+
+Each CLI run also writes `redacted.mp4.audit.json`. Options: `--keep` several times (several
+photos or people), `--style pixelate|blur|box`, `--threshold`, `--keep-audio`.
+
+> Run it on the machine or private server of whoever handles the request. A public upload
+> site would turn its operator into a processor of other people's biometric data, which is
+> what this tool exists to avoid.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    ref["Reference photo(s)"] --> emb0["SFace embedding<br/>(memory only)"]
-    video["Video"] --> det["YuNet<br/>face detection"]
+    video["Photo or video"] --> det["YuNet<br/>face detection"]
     det --> emb["Align + SFace<br/>embedding"]
-    emb0 --> sim["Cosine similarity<br/>to references"]
-    emb --> sim
-    det --> trk["IoU tracker<br/>+ appearance gate"]
-    sim --> trk
-    trk --> pol{"Fail-safe policy<br/>per track, then per frame"}
-    pol -->|"keep (strong, consistent match)"| render
-    pol -->|"blur (everything else,<br/>+ gap filling and padding)"| render["Render"]
-    render --> out["Redacted video"]
+    emb --> trk["IoU tracker<br/>+ appearance gate"]
+    trk --> people["Group tracks<br/>into people"]
+    people --> gallery["Gallery: tick who<br/>stays visible"]
+    ref["Optional reference photo"] -.->|pre-selects| gallery
+    gallery --> keep["People to keep<br/>(embeddings only)"]
+    cli["CLI: --keep photo.jpg"] --> keep
+    keep --> pol{"Fail-safe policy<br/>per track, then per frame"}
+    trk --> pol
+    pol -->|"keep: strong, consistent match"| render["Render"]
+    pol -->|"blur: everyone else,<br/>gaps and edges padded"| render
+    render --> out["Redacted copy"]
     pol --> audit["Audit record (JSON)"]
-    pol -.-> review["Optional human review<br/>(Streamlit)"] -.-> pol
 ```
 
-The redactor makes two passes. Pass 1 detects, embeds and tracks every face. Decisions
-need a person's whole track, so they are made between the passes. Pass 2 renders the
-result.
+`analyze` decodes the video once to detect, embed and track every face. `assess` compares
+every sighting with the people to keep and plans the blur; it is cheap, so changing the
+selection does not re-process the video. `render` decodes the video a second time and
+applies the plan. The CLI and the web app share all three steps.
+
+**Grouping by person** is deliberately conservative. Merging two different people would
+let one click reveal a stranger, while splitting one person only costs a second tick. Tracks
+are merged by average-linkage on their mean embeddings, with a threshold stricter than the
+verification point, and two tracks that appear in the same frame are never merged.
 
 | Module | Responsibility |
 |---|---|
 | `vision.py` | YuNet detector and SFace embedder (OpenCV DNN), reference photo enrollment |
 | `tracking.py` | Greedy IoU tracker. An appearance gate starts a new track when a different face appears in the same place. |
 | `policy.py` | Keep/blur decision per track, frame-level floor, gap filling and padding |
-| `pipeline.py` | `prepare → run_analysis → apply_overrides → render_file` |
+| `people.py` | Groups tracks into people for the gallery; never merges tracks that co-occur |
+| `pipeline.py` | `analyze → assess → render`, shared by the CLI and the web app |
 | `audit.py` | Audit record without biometric data |
-| `review.py` | Streamlit review UI with per-track overrides |
+| `web/` | FastAPI app: upload, background analysis with progress, gallery, render, download, delete |
 | `eval/` | WIDER FACE recall and LFW threshold calibration |
 
 ## Results
@@ -154,7 +176,7 @@ Leaving a third party visible is a data leak. Every default leans toward the fir
 ```
 ├── src/lgpd_face_redactor/
 │   ├── cli.py            # lgpd-redact
-│   ├── pipeline.py       # two-pass redaction
+│   ├── pipeline.py       # analyze → assess → render
 │   ├── policy.py         # fail-safe decisions
 │   ├── tracking.py       # IoU tracker with appearance gate
 │   ├── matching.py       # reference gallery, cosine similarity
@@ -162,8 +184,9 @@ Leaving a third party visible is a data leak. Every default leans toward the fir
 │   ├── models.py         # pinned, checksum-verified weights
 │   ├── media.py          # video/image I/O, optional audio mux
 │   ├── render.py         # pixelate / blur / box
+│   ├── people.py         # tracks → people
 │   ├── audit.py          # audit record
-│   └── review.py         # Streamlit review UI
+│   └── web/              # FastAPI app, templates, static assets
 ├── eval/                 # WIDER FACE recall, LFW calibration
 └── tests/                # scripted-face scenarios, OpenCV integration, real-model smoke tests
 ```
@@ -183,7 +206,8 @@ scenarios that matter without any real faces:
 - an identity switch is caught;
 - faces that cannot be aligned are blurred;
 - several people can be kept;
-- reviewer overrides are recorded.
+- a person who leaves and returns is one card, and co-occurring faces are never merged;
+- the web flow covers upload, gallery, selection, rendering, download, deletion and privacy headers.
 
 ## Limitations & roadmap
 
