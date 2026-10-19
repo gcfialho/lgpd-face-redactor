@@ -1,0 +1,23 @@
+name: Demo GIF
+
+# Rebuilds docs/img/demo.gif from public-domain NASA footage. Run manually; the result is
+# uploaded as an artifact for review before it is committed.
+on:
+  workflow_dispatch:
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync
+      - run: uv run python demo/make_demo.py --out docs/img
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo
+          path: docs/img/

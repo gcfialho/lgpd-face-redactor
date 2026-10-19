@@ -12,3 +12,4 @@ __pycache__/
 out/
 models/
 .eval-data/
+.demo/
