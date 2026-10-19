@@ -160,10 +160,15 @@ def main() -> None:
 
     gif = args.out / "demo.gif"
     palette = args.work / "palette.png"
-    vf = "fps=10,scale=960:-1:flags=lanczos"
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(side), "-vf", f"{vf},palettegen=stats_mode=diff", str(palette)], check=True)  # fmt: skip
+    vf = "fps=8,scale=800:-1:flags=lanczos"  # keeps the README GIF around 2-3 MB
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(side), "-vf", f"{vf},palettegen=max_colors=128:stats_mode=diff", str(palette)], check=True)  # fmt: skip
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(side), "-i", str(palette),
                     "-lavfi", f"{vf}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5", str(gif)], check=True)  # fmt: skip
+
+    # Small contact sheet (one frame per second) to review the result without the GIF.
+    sheet = args.work / "contact-sheet.png"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(side), "-vf",
+                    "fps=1,scale=480:-1,tile=2x3", "-frames:v", "1", str(sheet)], check=True)  # fmt: skip
 
     meta = {
         "source": f"NASA Image and Video Library, {NASA_ID} (public domain)",

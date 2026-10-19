@@ -20,4 +20,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: demo
-          path: docs/img/
+          path: |
+            docs/img/
+            .demo/contact-sheet.png
