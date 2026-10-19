@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>{% block title %}LGPD Face Redactor{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand">LGPD Face Redactor</a>
+    <span class="local">Runs on this machine. Nothing is sent anywhere else.</span>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  <footer>Files are deleted when you press <em>Delete</em> or after one hour. Review every output before releasing it.</footer>
+</body>
+</html>

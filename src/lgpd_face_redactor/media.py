@@ -93,3 +93,18 @@ def mux_audio(source: Path, redacted: Path) -> bool:
     subprocess.run(cmd, check=True)
     tmp.replace(redacted)
     return True
+
+
+def to_browser_mp4(video: Path) -> Path | None:
+    """H.264 copy for in-browser preview (OpenCV writes mp4v, which most browsers will not play).
+
+    Returns None when ffmpeg is unavailable; the redacted file itself is still downloadable.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return None
+    out = video.with_name(video.stem + ".web.mp4")
+    cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", str(video), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+           "-movflags", "+faststart", "-an", str(out)]  # fmt: skip
+    result = subprocess.run(cmd, check=False)
+    return out if result.returncode == 0 and out.exists() else None

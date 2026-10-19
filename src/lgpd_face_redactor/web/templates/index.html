@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h1>Redact a photo or video</h1>
+  <p class="lead">Upload the footage. You will see everyone it contains and choose who stays visible. Everyone else is blurred.</p>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  {% if request.query_params.get("deleted") %}<p class="notice" role="status">The job and its files were deleted.</p>{% endif %}
+
+  <form action="/jobs" method="post" enctype="multipart/form-data" class="stack">
+    <label class="drop">
+      <span class="drop-title">Photo or video</span>
+      <span class="hint">JPG, PNG, MP4, MOV, MKV, AVI or WebM</span>
+      <input type="file" name="file" required accept="image/*,video/*">
+    </label>
+
+    <details>
+      <summary>Optional: reference photo of the data subject</summary>
+      <p class="hint">If you add a photo with exactly one face, people who match it are pre-selected for you. You can still change the selection.</p>
+      <input type="file" name="references" accept="image/*" multiple>
+    </details>
+
+    <label class="inline">Blur style
+      <select name="style">
+        {% for s in styles %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+    </label>
+
+    <button type="submit" class="primary">Find people</button>
+  </form>
+</section>
+{% endblock %}

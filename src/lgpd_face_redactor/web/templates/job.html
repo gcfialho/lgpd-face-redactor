@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ job.original_name }} · LGPD Face Redactor{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="row">
+    <h1 class="filename">{{ job.original_name }}</h1>
+    <form action="/jobs/{{ job.id }}/delete" method="post">
+      <button type="submit" class="danger">Delete job and files</button>
+    </form>
+  </div>
+
+  {% if job.busy %}
+    <div class="progress" data-poll="/api/jobs/{{ job.id }}" data-status="{{ job.status }}">
+      <progress max="1" value="{{ job.progress }}"></progress>
+      <p class="message" role="status" aria-live="polite">{{ job.message }}</p>
+    </div>
+  {% elif job.status == Status.FAILED %}
+    <p class="alert" role="alert">{{ job.message }}: {{ job.error }}</p>
+    <p><a href="/">Try another file</a></p>
+  {% endif %}
+
+  {% if job.status == Status.DONE %}
+    {% set s = job.record.summary %}
+    <section class="result">
+      <h2>Redacted copy</h2>
+      <p>{{ job.selected|length }} {{ "person" if job.selected|length == 1 else "people" }} kept visible ·
+         {{ s.tracks_blurred }} of {{ s.tracks }} tracks blurred · {{ s.frames_with_redaction }} frames redacted</p>
+      {% if job.preview %}
+        {% if job.info.is_image %}
+          <img class="preview" src="/jobs/{{ job.id }}/preview" alt="Redacted image">
+        {% else %}
+          <video class="preview" src="/jobs/{{ job.id }}/preview" controls muted playsinline></video>
+        {% endif %}
+      {% else %}
+        <p class="hint">Install ffmpeg to preview videos in the browser. The download works either way.</p>
+      {% endif %}
+      <div class="actions">
+        <a class="button primary" href="/jobs/{{ job.id }}/download">Download redacted file</a>
+        <a class="button" href="/jobs/{{ job.id }}/audit.json">Download audit record</a>
+      </div>
+    </section>
+  {% endif %}
+</section>
+
+{% if job.status in (Status.READY, Status.DONE) %}
+<section class="card">
+  <h2>Who stays visible?</h2>
+  <p class="lead">Tick the people to keep. Everyone else, and anyone the tool is unsure about, is blurred.
+    {% if not job.info.is_image %}One card can cover several appearances of the same person.{% endif %}</p>
+
+  {% if not job.people %}
+    <p class="notice">No faces were found. The output will be identical to the input. Check it before releasing it.</p>
+  {% endif %}
+
+  <form action="/jobs/{{ job.id }}/render" method="post">
+    <div class="toolbar">
+      <button type="button" data-select="none">Blur everyone</button>
+      <label class="inline">Style
+        <select name="style">
+          {% for st in styles %}<option value="{{ st }}" {% if st == job.config.style %}selected{% endif %}>{{ st }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <ul class="gallery">
+      {% for p in job.people %}
+      {% set checked = (p.id in job.selected) if job.status == Status.DONE else (p.id in job.preselected) %}
+      <li>
+        <label class="person {% if not p.comparable %}disabled{% endif %}">
+          {% if p.id in job.thumbnails %}
+            <img src="/jobs/{{ job.id }}/people/{{ p.id }}.jpg" alt="Person {{ p.id + 1 }}" loading="lazy">
+          {% else %}
+            <span class="noimg">No preview</span>
+          {% endif %}
+          <span class="name">Person {{ p.id + 1 }}
+            {% if p.id in job.preselected %}<span class="badge">matches reference</span>{% endif %}</span>
+          {% if not job.info.is_image %}
+            <span class="meta">{{ "%.1f"|format(p.first_frame / job.info.fps) }}s – {{ "%.1f"|format(p.last_frame / job.info.fps) }}s · {{ p.frames }} frames</span>
+          {% endif %}
+          {% if p.comparable %}
+            <span class="check"><input type="checkbox" name="keep" value="{{ p.id }}" {% if checked %}checked{% endif %}> Keep visible</span>
+          {% else %}
+            <span class="meta warn">Face could not be compared, so it is always blurred</span>
+          {% endif %}
+        </label>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <button type="submit" class="primary">{{ "Render again" if job.status == Status.DONE else "Render redacted copy" }}</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
