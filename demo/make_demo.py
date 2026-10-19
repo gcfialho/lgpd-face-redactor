@@ -1,6 +1,6 @@
 """Builds the README before/after GIF from public-domain NASA footage.
 
-1. Download a NASA crew news conference (public domain, NASA Image and Video Library).
+1. Download NASA footage of a crew arriving at Kennedy Space Center (public domain, NASA Image and Video Library).
 2. Find a ~6 s window where at least three faces are visible the whole time.
 3. Pick one crew member as the "data subject" and take their reference photo from a
    different moment of the video (at least 30 s away), so the demo exercises real
@@ -25,11 +25,11 @@ from lgpd_face_redactor.matching import normalize
 from lgpd_face_redactor.pipeline import RedactionConfig, redact_file
 from lgpd_face_redactor.vision import SFaceEmbedder, YuNetDetector
 
-NASA_ID = "jsc2024m000139_Crew-9_Crew_News_Conference"
+NASA_ID = "KSC-20250726-VP-FMX01-0001-SpaceX_Crew_11_Astronaut_Arrival_LLF_720p-M14840"
 URL = f"https://images-assets.nasa.gov/video/{NASA_ID}/{NASA_ID}~medium.mp4"
 CLIP_SECONDS = 6
-MIN_FACES = 3
-MIN_MOTION = 2.0  # mean abs grey-level change between samples; rules out title cards and slides
+MIN_FACES = 2
+MIN_FACE_MOTION = 4.0  # px the faces themselves must move between samples; rules out title cards and slides
 MIN_SCENE_CHANGE = 12.0  # the reference must come from a visibly different shot than the clip
 
 
@@ -39,6 +39,17 @@ def thumb(frame: np.ndarray) -> np.ndarray:
 
 def diff(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.mean(np.abs(a - b)))
+
+
+def face_motion(previous, current) -> float:
+    """Mean distance from each face to the nearest face in the previous sample."""
+    if not previous or not current:
+        return 0.0
+    centres = [(f.box.x + f.box.w / 2, f.box.y + f.box.h / 2) for f in previous]
+    moves = [
+        min(np.hypot(f.box.x + f.box.w / 2 - cx, f.box.y + f.box.h / 2 - cy) for cx, cy in centres) for f in current
+    ]
+    return float(np.mean(moves))
 
 
 def sample(video: Path, detector, embedder, step_s: float, max_s: float):
@@ -82,8 +93,8 @@ def main() -> None:
         window = samples[i : i + CLIP_SECONDS + 1]
         if not all(len(s[2]) >= MIN_FACES for s in window):
             continue
-        motion = np.mean([diff(window[k][4], window[k - 1][4]) for k in range(1, len(window))])
-        if motion >= MIN_MOTION:
+        motion = np.mean([face_motion(window[k - 1][2], window[k][2]) for k in range(1, len(window))])
+        if motion >= MIN_FACE_MOTION:
             start, start_thumbs = window[0][0], [s[4] for s in window]
             break
     if start is None:
