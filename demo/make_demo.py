@@ -29,6 +29,16 @@ NASA_ID = "jsc2024m000139_Crew-9_Crew_News_Conference"
 URL = f"https://images-assets.nasa.gov/video/{NASA_ID}/{NASA_ID}~medium.mp4"
 CLIP_SECONDS = 6
 MIN_FACES = 3
+MIN_MOTION = 2.0  # mean abs grey-level change between samples; rules out title cards and slides
+MIN_SCENE_CHANGE = 12.0  # the reference must come from a visibly different shot than the clip
+
+
+def thumb(frame: np.ndarray) -> np.ndarray:
+    return cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (64, 36)).astype(np.float32)
+
+
+def diff(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.mean(np.abs(a - b)))
 
 
 def sample(video: Path, detector, embedder, step_s: float, max_s: float):
@@ -44,7 +54,7 @@ def sample(video: Path, detector, embedder, step_s: float, max_s: float):
             break
         faces = [f for f in detector.detect(frame) if f.box.w >= 40]
         embs = [embedder.embed(frame, f) for f in faces]
-        samples.append((t, frame, faces, embs))
+        samples.append((t, frame, faces, embs, thumb(frame)))
         t += step_s
     cap.release()
     return samples, fps
@@ -66,14 +76,18 @@ def main() -> None:
     detector, embedder = YuNetDetector(score_threshold=0.8), SFaceEmbedder()
     samples, fps = sample(source, detector, embedder, 1.0, args.scan_seconds)
 
-    # 1. Window with >= MIN_FACES faces in every sampled second.
+    # 1. Window of live footage (not a static card) with >= MIN_FACES faces in every sampled second.
     start = None
-    for i in range(len(samples) - CLIP_SECONDS):
-        if all(len(samples[i + k][2]) >= MIN_FACES for k in range(CLIP_SECONDS + 1)):
-            start = samples[i][0]
+    for i in range(1, len(samples) - CLIP_SECONDS):
+        window = samples[i : i + CLIP_SECONDS + 1]
+        if not all(len(s[2]) >= MIN_FACES for s in window):
+            continue
+        motion = np.mean([diff(window[k][4], window[k - 1][4]) for k in range(1, len(window))])
+        if motion >= MIN_MOTION:
+            start, start_thumbs = window[0][0], [s[4] for s in window]
             break
     if start is None:
-        raise SystemExit(f"No {CLIP_SECONDS}s window with {MIN_FACES}+ faces in the first {args.scan_seconds}s")
+        raise SystemExit(f"No moving {CLIP_SECONDS}s window with {MIN_FACES}+ faces in the first {args.scan_seconds}s")
 
     # 2. Subject: the second face from the left at the start of the window.
     t0 = next(s for s in samples if s[0] == start)
@@ -83,10 +97,10 @@ def main() -> None:
         raise SystemExit("No alignable face at the start of the window")
     subject_emb = normalize(t0[3][candidates[0]])
 
-    # 3. Reference photo of the same person from >= 30 s away.
+    # 3. Reference photo of the same person from >= 30 s away and a visibly different shot.
     best = None
-    for t, frame, faces, embs in samples:
-        if abs(t - start) < 30:
+    for t, frame, faces, embs, th in samples:
+        if abs(t - start) < 30 or min(diff(th, w) for w in start_thumbs) < MIN_SCENE_CHANGE:
             continue
         for face, emb in zip(faces, embs, strict=True):
             if emb is None:
