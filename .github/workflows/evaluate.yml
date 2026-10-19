@@ -1,0 +1,29 @@
+name: Evaluate
+
+# Benchmarks on public datasets. Run manually; results are uploaded as an artifact
+# and summarised in the README.
+on:
+  workflow_dispatch:
+    inputs:
+      wider_limit:
+        description: "WIDER FACE images to evaluate (0 = all 3,226)"
+        default: "0"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: LFW verification (threshold calibration)
+        run: uv run python eval/lfw_verification.py --data .eval-data --out eval/results/lfw.json
+      - name: WIDER FACE detector recall
+        run: uv run python eval/wider_recall.py --data .eval-data --out eval/results/wider.json --limit ${{ inputs.wider_limit }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval/results/

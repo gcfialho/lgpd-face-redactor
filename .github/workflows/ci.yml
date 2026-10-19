@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/lgpd-face-redactor
+          key: models-yunet2023mar-sface2021dec
+      - name: Tests (core, OpenCV integration, real models)
+        run: uv run pytest
