@@ -166,7 +166,7 @@ def main() -> None:
                     "-lavfi", f"{vf}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5", str(gif)], check=True)  # fmt: skip
 
     # Small contact sheet (one frame per second) to review the result without the GIF.
-    sheet = args.work / "contact-sheet.png"
+    sheet = args.out / "contact-sheet.png"  # for review only; not committed
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(side), "-vf",
                     "fps=1,scale=480:-1,tile=2x3", "-frames:v", "1", str(sheet)], check=True)  # fmt: skip
 
