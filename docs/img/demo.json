@@ -1,0 +1,47 @@
+{
+  "source": "NASA Image and Video Library, KSC-20250726-VP-FMX01-0001-SpaceX_Crew_11_Astronaut_Arrival_LLF_720p-M14840 (public domain)",
+  "clip_start_s": 702.0,
+  "reference_from_s": 759.0,
+  "reference_similarity_to_subject": 0.827,
+  "summary": {
+    "faces_detected": 540,
+    "tracks": 3,
+    "tracks_kept": 1,
+    "tracks_blurred": 2,
+    "manual_overrides": 0,
+    "frames_with_redaction": 180
+  },
+  "tracks": [
+    {
+      "track_id": 0,
+      "decision": "blur",
+      "reason": "median similarity 0.144 below 0.42",
+      "frames": 180,
+      "median_similarity": 0.1445,
+      "matched_share": 0.0,
+      "first_frame": 0,
+      "last_frame": 179
+    },
+    {
+      "track_id": 1,
+      "decision": "blur",
+      "reason": "median similarity 0.189 below 0.42",
+      "frames": 180,
+      "median_similarity": 0.1892,
+      "matched_share": 0.0,
+      "first_frame": 0,
+      "last_frame": 179
+    },
+    {
+      "track_id": 2,
+      "decision": "keep",
+      "reason": "consistent match with the reference",
+      "frames": 180,
+      "median_similarity": 0.5231,
+      "matched_share": 0.8444,
+      "first_frame": 0,
+      "last_frame": 179
+    }
+  ],
+  "gif_bytes": 3290821
+}
