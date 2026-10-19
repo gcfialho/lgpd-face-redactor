@@ -1,6 +1,6 @@
 name: Demo GIF
 
-# Rebuilds docs/img/demo.gif from public-domain NASA footage. Run manually; the result is
+# Rebuilds docs/img/demo.gif and the web app screenshots from public-domain NASA footage. Run manually; the result is
 # uploaded as an artifact for review before it is committed.
 on:
   workflow_dispatch:
@@ -15,8 +15,12 @@ jobs:
         with:
           enable-cache: true
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: uv sync
-      - run: uv run python demo/make_demo.py --out docs/img
+      - run: uv sync --extra web
+      - run: uv run --extra web python demo/make_demo.py --out docs/img
+      - name: Web app screenshots
+        run: |
+          uv run --extra web --with playwright python -m playwright install --with-deps chromium
+          uv run --extra web --with playwright python demo/screenshots.py --out docs/img
       - uses: actions/upload-artifact@v4
         with:
           name: demo
