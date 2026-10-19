@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+# Never commit footage, faces or outputs
+*.mp4
+*.mov
+*.avi
+*.mkv
+out/
+models/
+.eval-data/
