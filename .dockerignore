@@ -1,0 +1,5 @@
+.venv
+.git
+.demo
+.eval-data
+out

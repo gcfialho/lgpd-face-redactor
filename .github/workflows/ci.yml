@@ -13,7 +13,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --extra web
       - name: Lint
         run: |
           uv run ruff check .
