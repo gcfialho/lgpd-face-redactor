@@ -1,6 +1,7 @@
 """OpenCV-dependent tests: rendering, media round trips, and the real models wired up correctly."""
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,12 +16,12 @@ from lgpd_face_redactor.render import obscure  # noqa: E402
 from lgpd_face_redactor.types import Box, Style  # noqa: E402
 
 
-def textured(h=120, w=160, seed=0):
+def textured(h: int = 120, w: int = 160, seed: int = 0) -> np.ndarray:
     return np.random.default_rng(seed).integers(0, 255, (h, w, 3), dtype=np.uint8)
 
 
 @pytest.mark.parametrize("style", list(Style))
-def test_obscure_changes_only_the_box(style):
+def test_obscure_changes_only_the_box(style: Style) -> None:
     frame = textured()
     out = obscure(frame, [Box(40, 30, 50, 50)], style)
     assert not np.array_equal(out[30:80, 40:90], frame[30:80, 40:90])
@@ -29,20 +30,20 @@ def test_obscure_changes_only_the_box(style):
     assert np.array_equal(out[mask], frame[mask])
 
 
-def test_obscure_clips_boxes_outside_the_frame():
+def test_obscure_clips_boxes_outside_the_frame() -> None:
     frame = textured()
     out = obscure(frame, [Box(-30, -30, 60, 60), Box(500, 500, 10, 10)], Style.BOX)
     assert (out[:30, :30] == 0).all()
 
 
-def write_video(path, n=20, size=(160, 120)):
+def write_video(path: Path, n: int = 20, size: tuple[int, int] = (160, 120)) -> None:
     writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10, size)
     for i in range(n):
         writer.write(textured(size[1], size[0], seed=i))
     writer.release()
 
 
-def test_blur_all_video_round_trip(tmp_path):
+def test_blur_all_video_round_trip(tmp_path: Path) -> None:
     source, output = tmp_path / "in.mp4", tmp_path / "out.mp4"
     write_video(source)
     faces = walk(Box(40, 30, 40, 40), 1, 20)
@@ -58,7 +59,7 @@ def test_blur_all_video_round_trip(tmp_path):
     assert "embedding" not in json.dumps(record)  # no biometric data in the audit trail
 
 
-def test_image_input(tmp_path):
+def test_image_input(tmp_path: Path) -> None:
     source, output = tmp_path / "in.png", tmp_path / "out.png"
     cv2.imwrite(str(source), textured())
     detector = ScriptedDetector([[(Box(40, 30, 40, 40), 0)]])
@@ -67,7 +68,7 @@ def test_image_input(tmp_path):
 
 
 @pytest.mark.models
-def test_real_models_load_and_run(tmp_path):
+def test_real_models_load_and_run(tmp_path: Path) -> None:
     """Downloads YuNet and SFace (verified by SHA-256) and checks the OpenCV API wiring."""
     from lgpd_face_redactor.vision import SFaceEmbedder, YuNetDetector
 
@@ -77,7 +78,7 @@ def test_real_models_load_and_run(tmp_path):
 
 
 @pytest.mark.models
-def test_cli_blur_all_on_image_without_faces(tmp_path, capsys):
+def test_cli_blur_all_on_image_without_faces(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source, output = tmp_path / "in.png", tmp_path / "out.png"
     cv2.imwrite(str(source), np.zeros((120, 160, 3), np.uint8))
     assert main([str(source), "-o", str(output)]) == 0

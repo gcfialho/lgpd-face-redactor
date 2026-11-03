@@ -1,6 +1,8 @@
 """Web app end to end, with scripted faces: upload, gallery, select, render, download, delete."""
 
 import io
+from collections.abc import Iterator
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -19,23 +21,30 @@ ALICE, BOB = 1, 2
 LEFT, RIGHT = Box(20, 30, 50, 50), Box(140, 30, 50, 50)
 
 
+class StoreClient(TestClient):
+    """A test client that also exposes the job store behind the app."""
+
+    store: JobStore
+
+
 def png() -> bytes:
     image = np.random.default_rng(0).integers(0, 255, (120, 220, 3), dtype=np.uint8)
     ok, buf = cv2.imencode(".png", image)
     assert ok
-    return buf.tobytes()
+    encoded: bytes = buf.tobytes()
+    return encoded
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path: Path) -> Iterator[StoreClient]:
     detector = ScriptedDetector([[(LEFT, ALICE), (RIGHT, BOB)]] * 10)
     store = JobStore(lambda: detector, IdentityEmbedder, root=tmp_path, inline=True)
-    with TestClient(create_app(store)) as c:
+    with StoreClient(create_app(store)) as c:
         c.store = store
         yield c
 
 
-def upload(client) -> str:
+def upload(client: StoreClient) -> str:
     response = client.post(
         "/jobs", files={"file": ("party.png", io.BytesIO(png()), "image/png")}, data={"style": "box"}
     )
@@ -43,9 +52,10 @@ def upload(client) -> str:
     return str(response.url).rstrip("/").split("/")[-1]
 
 
-def test_upload_shows_one_card_per_person(client):
+def test_upload_shows_one_card_per_person(client: StoreClient) -> None:
     job_id = upload(client)
     job = client.store.get(job_id)
+    assert job is not None
     assert job.status is Status.READY
     assert len(job.people) == 2
 
@@ -54,9 +64,10 @@ def test_upload_shows_one_card_per_person(client):
     assert client.get(f"/jobs/{job_id}/people/0.jpg").headers["content-type"] == "image/jpeg"
 
 
-def test_keeping_one_person_blurs_the_other(client):
+def test_keeping_one_person_blurs_the_other(client: StoreClient) -> None:
     job_id = upload(client)
     job = client.store.get(job_id)
+    assert job is not None
     alice = next(p for p in job.people if p.best.box.x == LEFT.x)
 
     client.post(f"/jobs/{job_id}/render", data={"keep": [alice.id], "style": "box"})
@@ -73,28 +84,30 @@ def test_keeping_one_person_blurs_the_other(client):
     assert record["input"]["file"] == "party.png"
 
 
-def test_rendering_with_nobody_selected_blurs_everyone(client):
+def test_rendering_with_nobody_selected_blurs_everyone(client: StoreClient) -> None:
     job_id = upload(client)
     client.post(f"/jobs/{job_id}/render", data={"style": "box"})
     assert client.get(f"/jobs/{job_id}/audit.json").json()["summary"]["tracks_blurred"] == 2
 
 
-def test_delete_removes_every_file(client):
+def test_delete_removes_every_file(client: StoreClient) -> None:
     job_id = upload(client)
-    folder = client.store.get(job_id).folder
+    job = client.store.get(job_id)
+    assert job is not None
+    folder = job.folder
     assert folder.exists()
     client.post(f"/jobs/{job_id}/delete")
     assert not folder.exists()
     assert client.get(f"/jobs/{job_id}").status_code == 404
 
 
-def test_rejects_unsupported_files(client):
+def test_rejects_unsupported_files(client: StoreClient) -> None:
     response = client.post("/jobs", files={"file": ("notes.txt", io.BytesIO(b"hello"), "text/plain")})
     assert response.status_code == 400
     assert "Unsupported file type" in response.text
 
 
-def test_privacy_headers(client):
+def test_privacy_headers(client: StoreClient) -> None:
     headers = client.get("/").headers
     assert headers["cache-control"] == "no-store"
     assert "default-src 'self'" in headers["content-security-policy"]
