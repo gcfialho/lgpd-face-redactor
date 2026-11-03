@@ -16,6 +16,13 @@ from lgpd_face_redactor.types import Observation, Track
 
 
 @dataclass
+class _Cluster:
+    tracks: list[Track]
+    embeddings: list[np.ndarray]
+    frames: set[int]
+
+
+@dataclass
 class Person:
     id: int
     track_ids: list[int]
@@ -36,41 +43,41 @@ def _similarity(a: list[np.ndarray], b: list[np.ndarray]) -> float:
 
 
 def group_people(tracks: list[Track], merge_threshold: float = 0.5) -> list[Person]:
-    clusters: list[dict] = []
+    clusters: list[_Cluster] = []
     for track in tracks:
         mean = track.mean_embedding()
-        clusters.append({"tracks": [track], "embeddings": [mean] if mean is not None else [], "frames": track.frames()})
+        clusters.append(_Cluster(tracks=[track], embeddings=[mean] if mean is not None else [], frames=track.frames()))
 
     while True:
         best = None
         for i in range(len(clusters)):
             for j in range(i + 1, len(clusters)):
                 a, b = clusters[i], clusters[j]
-                if not a["embeddings"] or not b["embeddings"] or a["frames"] & b["frames"]:
+                if not a.embeddings or not b.embeddings or a.frames & b.frames:
                     continue
-                sim = _similarity(a["embeddings"], b["embeddings"])
+                sim = _similarity(a.embeddings, b.embeddings)
                 if sim >= merge_threshold and (best is None or sim > best[0]):
                     best = (sim, i, j)
         if best is None:
             break
         _, i, j = best
         a, b = clusters[i], clusters.pop(j)
-        a["tracks"] += b["tracks"]
-        a["embeddings"] += b["embeddings"]
-        a["frames"] |= b["frames"]
+        a.tracks += b.tracks
+        a.embeddings += b.embeddings
+        a.frames |= b.frames
 
     people = []
     for cluster in clusters:
-        observations = [o for t in cluster["tracks"] for o in t.observations]
+        observations = [o for t in cluster.tracks for o in t.observations]
         people.append(
             Person(
                 id=0,
-                track_ids=sorted(t.id for t in cluster["tracks"]),
-                frames=len(cluster["frames"]),
+                track_ids=sorted(t.id for t in cluster.tracks),
+                frames=len(cluster.frames),
                 first_frame=min(o.frame for o in observations),
                 last_frame=max(o.frame for o in observations),
                 best=max(observations, key=lambda o: o.score * o.box.area),
-                embeddings=cluster["embeddings"],
+                embeddings=cluster.embeddings,
             )
         )
     people.sort(key=lambda p: (-p.frames, p.first_frame))
