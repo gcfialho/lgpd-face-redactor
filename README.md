@@ -51,6 +51,12 @@ uv sync --extra web
 uv run lgpd-redact-web                  # http://127.0.0.1:8000
 ```
 
+| 1. Tick who stays visible | 2. Download the redacted copy |
+|---|---|
+| ![Gallery: one card per person found in the video, the reference match pre-selected](docs/img/web-gallery.png) | ![Result: two of three people pixelated, the data subject kept visible](docs/img/web-result.png) |
+
+*Screenshots taken in headless Chromium by the [Demo GIF workflow](.github/workflows/demo.yml), on public-domain NASA footage.*
+
 The same app runs in Docker, with the model weights baked into the image so it works offline:
 
 ```bash
