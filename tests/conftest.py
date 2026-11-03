@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 
 from lgpd_face_redactor.types import Box, Detection
 
 DIM = 128
+
+Script = list[list[tuple[Box, int]]]  # per frame: the (box, identity) of every face in it
+BlankFrames = Callable[[int], list[np.ndarray]]
 
 
 def identity_vector(seed: int, noise: float = 0.0, rng: np.random.Generator | None = None) -> np.ndarray:
@@ -21,7 +26,7 @@ def identity_vector(seed: int, noise: float = 0.0, rng: np.random.Generator | No
 class ScriptedDetector:
     """frames[i] is a list of (box, identity) pairs for frame i."""
 
-    def __init__(self, frames: list[list[tuple[Box, int]]]):
+    def __init__(self, frames: Script) -> None:
         self.frames = frames
         self.calls = 0
 
@@ -34,11 +39,12 @@ class ScriptedDetector:
 class IdentityEmbedder:
     """Embeds a detection as its identity's vector plus noise. identity < 0 means 'cannot align'."""
 
-    def __init__(self, noise: float = 0.15, seed: int = 0):
+    def __init__(self, noise: float = 0.15, seed: int = 0) -> None:
         self.noise = noise
         self.rng = np.random.default_rng(seed)
 
     def embed(self, image: np.ndarray, detection: Detection) -> np.ndarray | None:
+        assert detection.raw is not None
         identity = int(detection.raw[0])
         if identity < 0:
             return None
@@ -50,7 +56,7 @@ def walk(start: Box, dx: float, n: int) -> list[Box]:
 
 
 @pytest.fixture
-def blank_frames():
+def blank_frames() -> BlankFrames:
     def make(n: int) -> list[np.ndarray]:
         return [np.zeros((240, 320, 3), dtype=np.uint8) for _ in range(n)]
 

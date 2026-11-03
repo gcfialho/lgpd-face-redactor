@@ -9,24 +9,84 @@ from __future__ import annotations
 import dataclasses
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, TypedDict
 
 from lgpd_face_redactor import __version__, models
 from lgpd_face_redactor.policy import Decision
+
+if TYPE_CHECKING:
+    from lgpd_face_redactor.media import MediaInfo
+    from lgpd_face_redactor.pipeline import Analysis, RedactionConfig
+    from lgpd_face_redactor.types import FaceDetector
+
+
+class ToolEntry(TypedDict):
+    name: str
+    version: str
+
+
+class InputEntry(TypedDict):
+    file: str
+    sha256: str
+    frames: int
+    fps: float
+    resolution: list[int]
+
+
+class OutputEntry(TypedDict):
+    file: str
+    sha256: str
+    audio_kept: bool
+
+
+class ModelEntry(TypedDict):
+    name: str
+    sha256: str
+    license: str
+
+
+class SettingsEntry(TypedDict):
+    mode: str
+    people_kept_visible: int
+    detector_score_threshold: float | None
+    policy: dict[str, object]
+    tracker: dict[str, object]
+    style: str
+
+
+class SummaryEntry(TypedDict):
+    faces_detected: int
+    tracks: int
+    tracks_kept: int
+    tracks_blurred: int
+    frames_with_redaction: int
+
+
+class AuditRecord(TypedDict):
+    """The JSON document written next to every redacted file."""
+
+    tool: ToolEntry
+    created_at: str
+    input: InputEntry
+    output: OutputEntry
+    models: list[ModelEntry]
+    settings: SettingsEntry
+    summary: SummaryEntry
+    tracks: list[dict[str, object]]
 
 
 def build(
     source: Path,
     output: Path,
-    info,
-    analysis,
-    config,
-    detector,
+    info: MediaInfo,
+    analysis: Analysis,
+    config: RedactionConfig,
+    detector: FaceDetector | None,
     audio: bool,
     mode: str,
     kept_people: int,
     original_name: str | None = None,
-) -> dict[str, Any]:
+) -> AuditRecord:
     """`mode` is "keep-references" (CLI photos), "selected-people" (web gallery) or "blur-all"."""
     decisions = [analysis.decisions[t.id] for t in analysis.tracks]
     return {

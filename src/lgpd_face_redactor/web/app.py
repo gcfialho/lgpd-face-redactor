@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -41,7 +42,7 @@ def default_store() -> JobStore:
 
 def create_app(store: JobStore | None = None) -> FastAPI:
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.store = store or default_store()
         yield
         app.state.store.shutdown()  # nothing outlives the server
@@ -50,7 +51,7 @@ def create_app(store: JobStore | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 
     @app.middleware("http")
-    async def privacy_headers(request: Request, call_next):
+    async def privacy_headers(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         response = await call_next(request)
         response.headers.update(NO_STORE)
         response.headers["Content-Security-Policy"] = (
@@ -59,13 +60,13 @@ def create_app(store: JobStore | None = None) -> FastAPI:
         return response
 
     def job_or_404(request: Request, job_id: str) -> WebJob:
-        job = request.app.state.store.get(job_id)
+        job: WebJob | None = request.app.state.store.get(job_id)
         if job is None:
             raise HTTPException(404, "This job does not exist or has expired")
         return job
 
     @app.get("/")
-    def index(request: Request, error: str | None = None):
+    def index(request: Request, error: str | None = None) -> Response:
         return templates.TemplateResponse(request, "index.html", {"styles": list(Style), "error": error})
 
     @app.post("/jobs")
@@ -74,7 +75,7 @@ def create_app(store: JobStore | None = None) -> FastAPI:
         file: Annotated[UploadFile, File()],
         references: Annotated[list[UploadFile] | None, File()] = None,
         style: Annotated[Style, Form()] = Style.PIXELATE,
-    ):
+    ) -> Response:
         refs = [(r.file, r.filename or "reference.jpg") for r in (references or []) if r.filename]
         try:
             job = request.app.state.store.create(file.file, file.filename or "upload", refs, style)
@@ -85,17 +86,17 @@ def create_app(store: JobStore | None = None) -> FastAPI:
         return RedirectResponse(f"/jobs/{job.id}", status_code=303)
 
     @app.get("/jobs/{job_id}")
-    def job_page(request: Request, job_id: str):
+    def job_page(request: Request, job_id: str) -> Response:
         job = job_or_404(request, job_id)
         return templates.TemplateResponse(request, "job.html", {"job": job, "Status": Status, "styles": list(Style)})
 
-    @app.get("/api/jobs/{job_id}")
-    def job_status(request: Request, job_id: str):
+    @app.get("/api/jobs/{job_id}", response_model=None)
+    def job_status(request: Request, job_id: str) -> dict[str, object]:
         job = job_or_404(request, job_id)
         return {"status": job.status, "progress": round(job.progress, 3), "message": job.message, "error": job.error}
 
     @app.get("/jobs/{job_id}/people/{person_id}.jpg")
-    def thumbnail(request: Request, job_id: str, person_id: int):
+    def thumbnail(request: Request, job_id: str, person_id: int) -> FileResponse:
         path = job_or_404(request, job_id).thumbnails.get(person_id)
         if path is None or not path.exists():
             raise HTTPException(404)
@@ -107,7 +108,7 @@ def create_app(store: JobStore | None = None) -> FastAPI:
         job_id: str,
         keep: Annotated[list[int] | None, Form()] = None,
         style: Annotated[Style, Form()] = Style.PIXELATE,
-    ):
+    ) -> RedirectResponse:
         job = job_or_404(request, job_id)
         try:
             request.app.state.store.render(job, set(keep or []), style)
@@ -116,23 +117,23 @@ def create_app(store: JobStore | None = None) -> FastAPI:
         return RedirectResponse(f"/jobs/{job.id}", status_code=303)
 
     @app.get("/jobs/{job_id}/preview")
-    def preview(request: Request, job_id: str):
+    def preview(request: Request, job_id: str) -> FileResponse:
         job = job_or_404(request, job_id)
         if job.preview is None or not job.preview.exists():
             raise HTTPException(404, "No browser preview available")
         return FileResponse(job.preview)
 
     @app.get("/jobs/{job_id}/download")
-    def download(request: Request, job_id: str):
+    def download(request: Request, job_id: str) -> FileResponse:
         job = job_or_404(request, job_id)
-        if job.status is not Status.DONE or job.output is None:
+        if job.status is not Status.DONE or job.output is None or job.info is None:
             raise HTTPException(409, "Nothing to download yet")
         path = job.preview if job.preview and not job.info.is_image else job.output
         name = f"{Path(job.original_name).stem}-redacted{path.suffix if job.info.is_image else '.mp4'}"
         return FileResponse(path, filename=name)
 
     @app.get("/jobs/{job_id}/audit.json")
-    def audit_record(request: Request, job_id: str):
+    def audit_record(request: Request, job_id: str) -> Response:
         job = job_or_404(request, job_id)
         if job.record is None:
             raise HTTPException(409, "No audit record yet")
@@ -144,12 +145,12 @@ def create_app(store: JobStore | None = None) -> FastAPI:
         )
 
     @app.post("/jobs/{job_id}/delete")
-    def delete(request: Request, job_id: str):
+    def delete(request: Request, job_id: str) -> RedirectResponse:
         request.app.state.store.delete(job_id)
         return RedirectResponse("/?deleted=1", status_code=303)
 
     @app.get("/healthz")
-    def health():
+    def health() -> JSONResponse:
         return JSONResponse({"ok": True, "version": __version__})
 
     return app

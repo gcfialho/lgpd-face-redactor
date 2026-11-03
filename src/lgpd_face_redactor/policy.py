@@ -94,19 +94,20 @@ def plan_render(
                     plan.add(obs.frame, obs.box.expanded(config.box_expansion))
             continue
 
-        obs = track.observations
-        for i, current in enumerate(obs):
+        sightings = track.observations
+        for i, current in enumerate(sightings):
             plan.add(current.frame, current.box.expanded(config.box_expansion))
             # Fill detector misses between two sightings of the same blurred person.
-            if i + 1 < len(obs):
-                nxt = obs[i + 1]
+            if i + 1 < len(sightings):
+                nxt = sightings[i + 1]
                 gap = nxt.frame - current.frame
                 for f in range(current.frame + 1, nxt.frame):
                     t = (f - current.frame) / gap
                     plan.add(f, Box.lerp(current.box, nxt.box, t).expanded(config.box_expansion))
         # Hold the first and last box a few frames longer.
-        for f in range(max(0, obs[0].frame - config.pad_frames), obs[0].frame):
-            plan.add(f, obs[0].box.expanded(config.box_expansion))
-        for f in range(obs[-1].frame + 1, min(frame_count, obs[-1].frame + config.pad_frames + 1)):
-            plan.add(f, obs[-1].box.expanded(config.box_expansion))
+        first, last = sightings[0], sightings[-1]
+        for f in range(max(0, first.frame - config.pad_frames), first.frame):
+            plan.add(f, first.box.expanded(config.box_expansion))
+        for f in range(last.frame + 1, min(frame_count, last.frame + config.pad_frames + 1)):
+            plan.add(f, last.box.expanded(config.box_expansion))
     return plan

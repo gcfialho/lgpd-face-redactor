@@ -16,6 +16,7 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -23,6 +24,10 @@ from lgpd_face_redactor.matching import ReferenceGallery
 from lgpd_face_redactor.policy import Decision, PolicyConfig, RenderPlan, TrackDecision, decide, plan_render
 from lgpd_face_redactor.tracking import IouTracker, TrackerConfig
 from lgpd_face_redactor.types import FaceDetector, FaceEmbedder, Style, Track
+
+if TYPE_CHECKING:
+    from lgpd_face_redactor.audit import AuditRecord
+    from lgpd_face_redactor.media import MediaInfo
 
 log = logging.getLogger(__name__)
 
@@ -90,14 +95,14 @@ def render(frames: Iterable[np.ndarray], plan: RenderPlan, config: RedactionConf
         yield obscure(frame, boxes, config.style, config.blocks) if boxes else frame
 
 
-def config_for(info, config: RedactionConfig) -> RedactionConfig:
+def config_for(info: MediaInfo, config: RedactionConfig) -> RedactionConfig:
     """A still image has no history to confirm a match, so one frame is enough evidence."""
     if info.is_image:
         return dataclasses.replace(config, policy=dataclasses.replace(config.policy, min_frames=1, pad_frames=0))
     return config
 
 
-def render_file(source: Path, info, analysis: Analysis, output: Path, config: RedactionConfig) -> bool:
+def render_file(source: Path, info: MediaInfo, analysis: Analysis, output: Path, config: RedactionConfig) -> bool:
     """Writes the redacted copy. Returns whether the audio track was kept."""
     from lgpd_face_redactor import media
 
@@ -122,7 +127,7 @@ def redact_file(
     config: RedactionConfig,
     detector: FaceDetector | None = None,
     embedder: FaceEmbedder | None = None,
-) -> tuple[Analysis, dict]:
+) -> tuple[Analysis, AuditRecord]:
     """CLI path: keep the people in the reference photos, blur everyone else."""
     from lgpd_face_redactor import audit, media
     from lgpd_face_redactor.vision import SFaceEmbedder, YuNetDetector, reference_embedding
@@ -130,9 +135,12 @@ def redact_file(
     info = media.probe(source)
     config = config_for(info, config)
     detector = detector or YuNetDetector()
-    if references and embedder is None:
-        embedder = SFaceEmbedder()
-    gallery = ReferenceGallery([reference_embedding(r, detector, embedder) for r in references])
+    gallery = ReferenceGallery()
+    if references:
+        if embedder is None:
+            embedder = SFaceEmbedder()
+        for reference in references:
+            gallery.add(reference_embedding(reference, detector, embedder))
 
     analysis = assess(analyze(media.frames(info), detector, embedder, config), gallery, config)
     audio = render_file(source, info, analysis, output, config)

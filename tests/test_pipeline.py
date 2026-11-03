@@ -1,29 +1,31 @@
 """End-to-end analysis with scripted faces: the scenarios a redaction tool must get right."""
 
-from conftest import IdentityEmbedder, ScriptedDetector, identity_vector, walk
+from conftest import BlankFrames, IdentityEmbedder, Script, ScriptedDetector, identity_vector, walk
 
 from lgpd_face_redactor.matching import ReferenceGallery
-from lgpd_face_redactor.pipeline import RedactionConfig, analyze, assess
+from lgpd_face_redactor.pipeline import Analysis, RedactionConfig, analyze, assess
 from lgpd_face_redactor.policy import Decision
 from lgpd_face_redactor.types import Box
 
 SUBJECT, STRANGER, OTHER = 1, 2, 3
 
 
-def run(script, blank_frames, references=(SUBJECT,), noise=0.15):
+def run(
+    script: Script, blank_frames: BlankFrames, references: tuple[int, ...] = (SUBJECT,), noise: float = 0.15
+) -> Analysis:
     gallery = ReferenceGallery([identity_vector(r) for r in references])
     config = RedactionConfig()
     analysis = analyze(blank_frames(len(script)), ScriptedDetector(script), IdentityEmbedder(noise), config)
     return assess(analysis, gallery, config)
 
 
-def visible(analysis, frame: int, box: Box) -> bool:
+def visible(analysis: Analysis, frame: int, box: Box) -> bool:
     """A face is visible if no planned blur box covers its centre."""
     cx, cy = box.x + box.w / 2, box.y + box.h / 2
     return not any(b.x <= cx <= b.x + b.w and b.y <= cy <= b.y + b.h for b in analysis.plan.blur_boxes.get(frame, []))
 
 
-def test_subject_visible_stranger_blurred(blank_frames):
+def test_subject_visible_stranger_blurred(blank_frames: BlankFrames) -> None:
     subject, stranger = walk(Box(20, 50, 40, 40), 1, 30), walk(Box(220, 50, 40, 40), -1, 30)
     script = [[(subject[f], SUBJECT), (stranger[f], STRANGER)] for f in range(30)]
     analysis = run(script, blank_frames)
@@ -34,13 +36,13 @@ def test_subject_visible_stranger_blurred(blank_frames):
     assert not any(visible(analysis, f, stranger[f]) for f in range(30))
 
 
-def test_no_reference_blurs_everyone(blank_frames):
+def test_no_reference_blurs_everyone(blank_frames: BlankFrames) -> None:
     faces = walk(Box(20, 50, 40, 40), 1, 10)
     analysis = run([[(faces[f], SUBJECT)] for f in range(10)], blank_frames, references=())
     assert not any(visible(analysis, f, faces[f]) for f in range(10))
 
 
-def test_stranger_missed_for_a_few_frames_stays_blurred(blank_frames):
+def test_stranger_missed_for_a_few_frames_stays_blurred(blank_frames: BlankFrames) -> None:
     """Detector misses (blur, motion, occlusion) must not reveal a third party in between."""
     stranger = walk(Box(100, 50, 40, 40), 2, 20)
     script = [[] if 8 <= f <= 11 else [(stranger[f], STRANGER)] for f in range(20)]
@@ -48,7 +50,7 @@ def test_stranger_missed_for_a_few_frames_stays_blurred(blank_frames):
     assert not any(visible(analysis, f, stranger[f]) for f in range(20))
 
 
-def test_brief_glimpse_of_subject_is_blurred(blank_frames):
+def test_brief_glimpse_of_subject_is_blurred(blank_frames: BlankFrames) -> None:
     """Two frames are not enough evidence; fail safe."""
     face = Box(50, 50, 40, 40)
     script = [[(face, SUBJECT)] if f < 2 else [] for f in range(10)]
@@ -56,7 +58,7 @@ def test_brief_glimpse_of_subject_is_blurred(blank_frames):
     assert not visible(analysis, 0, face)
 
 
-def test_stranger_stepping_into_subject_position_is_not_revealed(blank_frames):
+def test_stranger_stepping_into_subject_position_is_not_revealed(blank_frames: BlankFrames) -> None:
     """Identity switch: the subject leaves and a stranger appears in the same spot."""
     spot = Box(80, 50, 40, 40)
     script = [[(spot, SUBJECT)] if f < 15 else [(spot, STRANGER)] for f in range(30)]
@@ -68,21 +70,21 @@ def test_stranger_stepping_into_subject_position_is_not_revealed(blank_frames):
     assert not any(visible(analysis, f, spot) for f in range(15, 30))
 
 
-def test_unalignable_faces_are_blurred(blank_frames):
+def test_unalignable_faces_are_blurred(blank_frames: BlankFrames) -> None:
     edge_face = Box(0, 50, 40, 40)
     script = [[(edge_face, -1)] for _ in range(10)]
     analysis = run(script, blank_frames)
     assert not any(visible(analysis, f, edge_face) for f in range(10))
 
 
-def test_several_people_can_be_kept(blank_frames):
+def test_several_people_can_be_kept(blank_frames: BlankFrames) -> None:
     a, b = walk(Box(20, 50, 40, 40), 1, 20), walk(Box(200, 50, 40, 40), -1, 20)
     script = [[(a[f], SUBJECT), (b[f], OTHER)] for f in range(20)]
     analysis = run(script, blank_frames, references=(SUBJECT, OTHER))
     assert all(d.decision is Decision.KEEP for d in analysis.decisions.values())
 
 
-def test_reassessing_with_a_different_selection_needs_no_new_pass(blank_frames):
+def test_reassessing_with_a_different_selection_needs_no_new_pass(blank_frames: BlankFrames) -> None:
     """The web flow: analyse once, then assess for whichever people the reviewer picks."""
     a, b = walk(Box(20, 50, 40, 40), 1, 20), walk(Box(200, 50, 40, 40), -1, 20)
     script = [[(a[f], SUBJECT), (b[f], OTHER)] for f in range(20)]

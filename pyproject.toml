@@ -26,7 +26,7 @@ build-backend = "hatchling.build"
 packages = ["src/lgpd_face_redactor"]
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff>=0.12", "httpx>=0.27"]
+dev = ["pytest>=8.3", "ruff>=0.12", "httpx>=0.27", "mypy>=2.4"]
 
 [tool.ruff]
 line-length = 120
@@ -35,6 +35,11 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -202,6 +202,7 @@ Leaving a third party visible is a data leak. Every default leans toward the fir
 ```bash
 uv run pytest            # all tests; the real-model ones download the weights once
 uv run pytest -m "not models"
+uv run mypy              # src/ and tests/ are type-checked with mypy --strict
 ```
 
 The core tests use scripted detections and identity-coded embeddings, so they cover the

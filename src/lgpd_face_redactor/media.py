@@ -48,7 +48,10 @@ def probe(path: Path) -> MediaInfo:
 
 def frames(info: MediaInfo) -> Iterator[np.ndarray]:
     if info.is_image:
-        yield cv2.imread(str(info.path))
+        image = cv2.imread(str(info.path))
+        if image is None:
+            raise ValueError(f"Cannot read image: {info.path}")
+        yield image
         return
     cap = cv2.VideoCapture(str(info.path))
     try:
@@ -66,7 +69,7 @@ class Writer:
         self.info, self.output = info, output
         self._video: cv2.VideoWriter | None = None
         if not info.is_image:
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            fourcc = cv2.VideoWriter.fourcc(*"mp4v")
             self._video = cv2.VideoWriter(str(output), fourcc, info.fps, (info.width, info.height))
             if not self._video.isOpened():
                 raise ValueError(f"Cannot write video: {output}")
