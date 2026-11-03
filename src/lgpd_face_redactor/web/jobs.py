@@ -66,7 +66,7 @@ class WebJob:
     selected: set[int] = field(default_factory=set)
     output: Path | None = None
     preview: Path | None = None  # browser-playable copy of the output, when ffmpeg is available
-    record: dict | None = None
+    record: audit.AuditRecord | None = None
 
     @property
     def busy(self) -> bool:
@@ -91,7 +91,6 @@ class JobStore:
         self.max_upload_bytes = max_upload_bytes
         self._jobs: dict[str, WebJob] = {}
         self._lock = threading.Lock()
-        self._inline = inline
         self._executor = None if inline else ThreadPoolExecutor(max_workers=1, thread_name_prefix="redactor")
 
     # ---- lifecycle -------------------------------------------------------------------------
@@ -158,11 +157,11 @@ class JobStore:
 
     # ---- work ------------------------------------------------------------------------------
 
-    def _submit(self, fn: Callable, *args) -> Future | None:
-        if self._inline:
-            fn(*args)
+    def _submit[**P](self, fn: Callable[P, None], *args: P.args, **kwargs: P.kwargs) -> Future[None] | None:
+        if self._executor is None:  # inline mode: run synchronously
+            fn(*args, **kwargs)
             return None
-        return self._executor.submit(fn, *args)
+        return self._executor.submit(fn, *args, **kwargs)
 
     def _models(self) -> tuple[FaceDetector, FaceEmbedder]:
         if self._detector is None:
@@ -175,8 +174,8 @@ class JobStore:
         try:
             job.status, job.message = Status.ANALYSING, "Loading models"
             detector, embedder = self._models()
-            job.info = media.probe(job.source)
-            job.config = config_for(job.info, job.config)
+            info = job.info = media.probe(job.source)
+            job.config = config_for(info, job.config)
 
             reference = ReferenceGallery()
             if references:
@@ -185,16 +184,16 @@ class JobStore:
                 for path in references:
                     reference.add(reference_embedding(path, detector, embedder))
 
-            total = max(1, job.info.frame_count)
+            total = max(1, info.frame_count)
 
             def progress(index: int) -> None:
                 job.progress = min(0.99, (index + 1) / total)
                 job.message = f"Finding faces: frame {index + 1} of {total}"
 
-            job.analysis = analyze(media.frames(job.info), detector, embedder, job.config, progress)
+            job.analysis = analyze(media.frames(info), detector, embedder, job.config, progress)
             job.people = group_people(job.analysis.tracks)
             job.message = "Preparing the gallery"
-            job.thumbnails = self._thumbnails(job)
+            job.thumbnails = self._thumbnails(job, info)
             if len(reference):
                 threshold = job.config.policy.threshold
                 job.preselected = {
@@ -209,7 +208,7 @@ class JobStore:
         except Exception as exc:  # surfaced to the user; the job folder is still deleted on expiry
             job.status, job.error, job.message = Status.FAILED, str(exc), "Analysis failed"
 
-    def _thumbnails(self, job: WebJob) -> dict[int, Path]:
+    def _thumbnails(self, job: WebJob, info: media.MediaInfo) -> dict[int, Path]:
         import cv2
 
         wanted: dict[int, list[Person]] = {}
@@ -218,7 +217,7 @@ class JobStore:
         out: dict[int, Path] = {}
         thumbs = job.folder / "thumbs"
         thumbs.mkdir()
-        for index, frame in enumerate(media.frames(job.info)):
+        for index, frame in enumerate(media.frames(info)):
             for person in wanted.get(index, []):
                 box = person.best.box.expanded(1.3)
                 x1, y1 = max(0, int(box.x)), max(0, int(box.y))
